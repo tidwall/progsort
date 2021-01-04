@@ -33,7 +33,7 @@ func TestSlice(t *testing.T) {
 		Slice(nums[:N], func(i, j int) bool {
 			return nums[i] < nums[j]
 		}, func(prog float64) {
-			fmt.Printf("\rSorting... %0.1f%% ", prog*100)
+			// fmt.Printf("\rSorting... %0.1f%% ", prog*100)
 		}, 0)
 		fmt.Println()
 	}
