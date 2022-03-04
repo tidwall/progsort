@@ -7,10 +7,10 @@ Sorts a slice and provides continual progress.
 This library was designed specifically to sort very large arrays using multiple
 CPU cores while having the ability to monitor the progress while the sort is in-process.
 
-- Stable Sort, uses the [merge sort](https://en.wikipedia.org/wiki/Merge_sort) 
+- Stable, uses the [merge sort](https://en.wikipedia.org/wiki/Merge_sort) 
 algorithm.
 - Multithreaded, splits sorting over multiple goroutines.
-- Sort with progress, useful for displaying continual progress for large arrays.
+- Monitor progress, useful for displaying continual progress for large arrays.
 - Cancellable, stop the sort early
 - Generics support, Go 1.18+
 
