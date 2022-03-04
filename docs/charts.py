@@ -71,6 +71,6 @@ def chart(start, end, name):
 	# plt.show()
 
 # Output each chart
-chart(0, 5, "out1.png")
-chart(5, 10, "out2.png")
-chart(10, 15, "out3.png")
+chart(0, 5, "chart1.png")
+chart(5, 10, "chart2.png")
+chart(10, 15, "chart3.png")

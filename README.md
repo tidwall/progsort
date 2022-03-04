@@ -214,3 +214,9 @@ BenchmarkInts/stdlib/100000000-16        1   18037104155 ns/op
 BenchmarkInts/stdlib/500000000-16        1   93730488701 ns/op
 BenchmarkInts/stdlib/1000000000-16       1  216609456504 ns/op
 ```
+
+![Chart 1](docs/chart1.png)
+
+![Chart 2](docs/chart2.png)
+
+![Chart 3](docs/chart3.png)
