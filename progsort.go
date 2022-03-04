@@ -223,7 +223,6 @@ func mergeSortUnit[T any](
 	nsteps int64,
 	scounter int64,
 ) (int64, bool) {
-	const progFlush = 1024
 	i := start1
 	var a, b T
 	var aset, bset bool
