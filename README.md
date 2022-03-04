@@ -5,7 +5,7 @@
 Sorts a slice and provides continual progress.
 
 This library was designed specifically to sort very large arrays using multiple
-CPU cores while having the ability to monitor the progress while the sort is in-process.
+threads while having the ability to monitor the progress while the sort is in-process.
 
 - Stable, uses the [merge sort](https://en.wikipedia.org/wiki/Merge_sort) 
 algorithm.
