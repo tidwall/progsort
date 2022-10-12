@@ -25,10 +25,7 @@ go get -u github.com/tidwall/progsort
 ## Usage 
 
 ```go
-// Sort sorts data given the provided less function.
-//
-// The nprocs param is number background goroutines used to help with
-// sorting. Setting this to zero will use runtime.NumCPU().
+// Sort data given the provided less function.
 //
 // The spare param is a slice that the caller can provide for helping with the
 // merge sort algorithm. When this is provided it must the same length as the
@@ -38,32 +35,16 @@ go get -u github.com/tidwall/progsort
 // spare slice under-the-hood by allocating the needed memory, which also
 // ensures that the data slice will always end up with the final sorted data.
 //
-// The prog param can be optionally provided if the caller want to monitor the
-// continual progress of the sort operation. This param is a pointer to an
-// int32 that can be then atomically read by the caller while the sort is in
-// progress. The value of will be in the range of [0,math.MaxInt32].
-// Reading the progress can be done like:
+// The prog function can be optionally provided if the caller want to monitor
+// the continual progress of the sort operation, which is a percentage between
+// the range [0.0,1.0]. Set prog to nil if progress monitoring is not needed.
 //
-//     p := float64(atomic.LoadInt32(&prog))/math.MaxInt32
-//
-// Which will convert prog into a percentage between the range [0.0,1.0].
-// Set prog to nil if progress monitoring is not needed.
-//
-// The cancel param can be used to cancel the sorting early. At any point
-// while the sort is in progress, the cancel can be set to a non-zero value by
-// the caller, and the sort will end early.
-// This should be done atomically like:
-//
-//     atomic.StoreInt32(&cancel, 1)
-//
-// Set cancel to nil if cancellability is not needed.
+// Return false from the prog function to cancel the sorting early.
 func Sort[T any](
 	data []T,
-	less func(a, b T) bool,
-	nprocs int,
 	spare []T,
-	prog *int32,
-	cancel *int32,
+	less func(a, b T) bool,
+	prog func(prec float64) bool,
 ) (swapped bool)
 ```
 
@@ -95,7 +76,7 @@ func main() {
 		return a < b
 	}
 
-	swapped := progsort.Sort(nums, less, 0, spare, nil, nil)
+	swapped := progsort.Sort(nums, spare, less, nil)
 	if swapped {
 		// The spare slice has the sorted data
 	} else {
@@ -136,28 +117,14 @@ func main() {
 		return a < b
 	}
 
-	var prog int32   // Atomic value that contains progress [0,math.MaxInt32]
-	var cancel int32 // Atomic boolean for ending the sort early.
-
-	// sort in a background goroutine
-	var swapped bool
-	doneC := make(chan bool)
-	go func() {
-		swapped = progsort.Sort(nums, less, 0, spare, &prog, &cancel)
-		doneC <- true
-	}()
-
-	// monitor the progress in the foreground
-	t := time.NewTicker(time.Second / 10)
-	var done bool
-	for !done {
-		select {
-		case done = <-doneC:
-		case <-t.C:
-		}
-		p := float64(atomic.LoadInt32(&prog)) / math.MaxInt32
-		fmt.Printf("%0.1f%%\n", p*100)
+	// Define the prog callback
+	prog := func(perc float64) bool {
+		fmt.Printf("%0.1f%%\n", perc*100)
+		return true
 	}
+
+	swapped := progsort.Sort(nums, spare, less, prog)
+
 	if swapped {
 		// The spare slice has the sorted data
 	} else {
@@ -168,7 +135,7 @@ func main() {
 
 ## Performance 
 
-The following benchmarks were run on my 2019 Macbook Pro (2.4 GHz 8-Core Intel Core i9) using Go Development version 1.18 (rc1). The items are simple 8-byte ints.
+The following benchmarks were run on my 2019 Macbook Pro (2.4 GHz 8-Core Intel Core i9) using Go Development version 1.18. The items are simple 8-byte ints.
 
 ```
 BIGCHART=1 go test -bench . -timeout 60m

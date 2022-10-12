@@ -9,47 +9,28 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-// Sort sorts data given the provided less function.
-//
-// The nprocs param is number background goroutines used to help with
-// sorting. Setting this to zero will use runtime.NumCPU().
+// Sort data given the provided less function.
 //
 // The spare param is a slice that the caller can provide for helping with the
 // merge sort algorithm. When this is provided it must the same length as the
-// data slice, also the caller is responsible to check the return value to
+// data slice, also the caller is responsible for checking the return value to
 // determine if the data slice or the spare slice has the final sorted data.
 // Setting spare to nil will have the sort operation manage the memory of the
 // spare slice under-the-hood by allocating the needed memory, which also
 // ensures that the data slice will always end up with the final sorted data.
 //
-// The prog param can be optionally provided if the caller want to monitor the
-// continual progress of the sort operation. This param is a pointer to an
-// int32 that can be then atomically read by the caller while the sort is in
-// progress. The value of will be in the range of [0,math.MaxInt32].
-// Reading the progress can be done like:
-//
-//     p := float64(atomic.LoadInt32(&prog))/math.MaxInt32
-//
-// Which will convert prog into a percentage between the range [0.0,1.0].
-// Set prog to nil if progress monitoring is not needed.
-//
-// The cancel param can be used to cancel the sorting early. At any point
-// while the sort is in progress, the cancel can be set to a non-zero value by
-// the caller, and the sort will end early.
-// This should be done atomically like:
-//
-//     atomic.StoreInt32(&cancel, 1)
-//
-// Set cancel to nil if cancellability is not needed.
+// The prog function can be optionally provided if the caller want to monitor
+// the continual progress of the sort operation, which is a percentage between
+// the range [0.0,1.0]. Set prog to nil if progress monitoring is not needed.
+// Returning false from the prog function will cancel the sorting early.
 func Sort[T any](
 	data []T,
-	less func(a, b T) bool,
-	nprocs int,
 	spare []T,
-	prog *int32,
-	cancel *int32,
+	less func(a, b T) bool,
+	prog func(prec float64) bool,
 ) (swapped bool) {
 	var spared bool
 	if spare == nil {
@@ -58,23 +39,41 @@ func Sort[T any](
 	if len(data) != len(spare) {
 		panic("len(active) != len(spare)")
 	}
-	if nprocs <= 0 {
-		nprocs = runtime.NumCPU()
-	}
-	var vproc int32
-	if prog == nil {
-		prog = &vproc
-	}
+	nprocs := runtime.NumCPU()
+	var vprog int32
 	var vcancel int32
-	if cancel == nil {
-		cancel = &vcancel
+	var vdone int32
+	var wg sync.WaitGroup
+	if prog != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var lperc float64
+			for {
+				done := atomic.LoadInt32(&vdone) == 1
+				perc := float64(atomic.LoadInt32(&vprog)) / math.MaxInt32
+				if perc > lperc {
+					if !prog(perc) {
+						atomic.StoreInt32(&vcancel, 1)
+						break
+					}
+				}
+				if done {
+					break
+				}
+				time.Sleep(time.Second / 5)
+			}
+
+		}()
 	}
-	swapped = mergeSort(data, spare, less, nprocs, prog, cancel)
+	swapped = mergeSort(data, spare, less, nprocs, &vprog, &vcancel)
 	if swapped && spared {
 		copy(data, spare)
 		swapped = false
 	}
-	atomic.StoreInt32(prog, math.MaxInt32)
+	atomic.StoreInt32(&vprog, math.MaxInt32)
+	atomic.StoreInt32(&vdone, 1)
+	wg.Wait()
 	return swapped
 }
 
@@ -122,8 +121,7 @@ func mergeSort[T any](
 	datas[1] = spare
 
 	var wg sync.WaitGroup
-	var mergeC chan mergeGroup
-	mergeC = make(chan mergeGroup, nprocs*16)
+	mergeC := make(chan mergeGroup, nprocs*16)
 	defer func() {
 		close(mergeC)
 		wg.Wait()

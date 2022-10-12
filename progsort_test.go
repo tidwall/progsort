@@ -42,11 +42,15 @@ func TestProgSort(t *testing.T) {
 		var cancel int32
 		done := make(chan bool, 1)
 		go func() {
-			swapped := Sort(items, func(a, b int) bool {
+			swapped := Sort(items, final, func(a, b int) bool {
 				return a < b
-			}, 0, final, &prog, &cancel)
+			}, func(perc float64) bool {
+				// &prog, &cancel
+				atomic.StoreInt32(&prog, int32(perc*math.MaxInt32))
+				return atomic.LoadInt32(&cancel) == 0
+			})
 			if swapped {
-				items, final, swapped = final, items, !swapped
+				items, final = final, items
 			}
 			done <- true
 		}()
@@ -126,7 +130,7 @@ func benchInts(b *testing.B, N int) {
 	items := rand.Perm(N)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Sort(items, func(a, b int) bool { return a < b }, 0, nil, nil, nil)
+		Sort(items, nil, func(a, b int) bool { return a < b }, nil)
 	}
 }
 
