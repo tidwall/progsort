@@ -105,7 +105,7 @@ func mergeSortBytes(
 	datas[1] = spare
 
 	var wg sync.WaitGroup
-	mergeC := make(chan mergeGroup, nprocs)
+	mergeC := make(chan mergeGroup, nprocs*16)
 	defer func() {
 		close(mergeC)
 		wg.Wait()
