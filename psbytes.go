@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Sort data given the provided less function.
+// SortBytes data given the provided less function.
 //
 // The spare param is a slice that the caller can provide for helping with the
 // merge sort algorithm. When this is provided it must the same length as the
@@ -26,15 +26,19 @@ import (
 // the continual progress of the sort operation, which is a percentage between
 // the range [0.0,1.0]. Set prog to nil if progress monitoring is not needed.
 // Returning false from the prog function will cancel the sorting early.
-func Sort[T any](
-	data []T,
-	spare []T,
-	less func(a, b T) bool,
+func SortBytes(
+	data []byte,
+	spare []byte,
+	elsize int,
+	less func(a, b []byte) bool,
 	prog func(prec float64) bool,
 ) (swapped bool) {
+	if len(data)%elsize != 0 {
+		panic("len(data)%elsize != 0")
+	}
 	var spared bool
 	if spare == nil {
-		spare = make([]T, len(data))
+		spare = make([]byte, len(data))
 	}
 	if len(data) != len(spare) {
 		panic("len(active) != len(spare)")
@@ -66,7 +70,9 @@ func Sort[T any](
 
 		}()
 	}
-	swapped = mergeSort(data, spare, less, nprocs, &vprog, &vcancel)
+	swapped = mergeSortBytes(data, spare,
+		len(data)/elsize, elsize, nprocs,
+		less, &vprog, &vcancel)
 	if swapped && spared {
 		copy(data, spare)
 		swapped = false
@@ -77,46 +83,24 @@ func Sort[T any](
 	return swapped
 }
 
-const pchunk = 1024
-
-type mergeGroup struct {
-	count  int
-	i1, z1 int
-	i2, z2 int
-}
-
-func addSteps(
-	delta int64, prog *int32, cancel *int32,
-	smu *sync.Mutex, steps *int64, nsteps int64,
-) bool {
-	if atomic.LoadInt32(cancel) != 0 {
-		return false
-	}
-	smu.Lock()
-	var vsteps int64
-	*steps += delta
-	vsteps = *steps
-	perc := float64(vsteps) / float64(nsteps)
-	atomic.StoreInt32(prog, int32(math.MaxInt32*perc))
-	smu.Unlock()
-	return true
-}
-
-func mergeSort[T any](
-	active, spare []T,
-	less func(a, b T) bool,
+func mergeSortBytes(
+	active []byte,
+	spare []byte,
+	nitems int,
+	elsize int,
 	nprocs int,
+	less func(a, b []byte) bool,
 	prog *int32,
 	cancel *int32,
 ) (swapped bool) {
 
-	start, end := 0, len(active)
+	start, end := 0, nitems
 	nmlevels := calcMergeLevels(end - start)
 	nsteps := int64(nmlevels * (end - start))
 	var smu sync.Mutex
 	var steps int64
 
-	var datas [2][]T
+	var datas [2][]byte
 	datas[0] = active
 	datas[1] = spare
 
@@ -132,9 +116,9 @@ func mergeSort[T any](
 			for m := range mergeC {
 				for i := 0; i < m.count; i++ {
 					var ok bool
-					scounter, ok = mergeSortUnit(
+					scounter, ok = mergeSortUnitBytes(
 						m.i1, m.i1+m.z1, m.i2, m.i2+m.z2,
-						active, spare, less, prog, cancel,
+						active, spare, nitems, elsize, less, prog, cancel,
 						&smu, &steps, nsteps,
 						scounter,
 					)
@@ -209,11 +193,13 @@ func mergeSort[T any](
 	return swapped
 }
 
-func mergeSortUnit[T any](
+func mergeSortUnitBytes(
 	start1, end1 int,
 	start2, end2 int,
-	active, spare []T,
-	less func(a, b T) bool,
+	active, spare []byte,
+	nitems int,
+	elsize int,
+	less func(a, b []byte) bool,
 	prog *int32,
 	cancel *int32,
 	smu *sync.Mutex,
@@ -222,21 +208,21 @@ func mergeSortUnit[T any](
 	scounter int64,
 ) (int64, bool) {
 	i := start1
-	var a, b T
+	var a, b []byte
 	var aset, bset bool
 	for start1 < end1 && start2 < end2 {
 		if !aset {
-			a = active[start1]
+			a = active[start1*elsize:][:elsize]
 		}
 		if !bset {
-			b = active[start2]
+			b = active[start2*elsize:][:elsize]
 		}
 		if less(b, a) {
-			spare[i] = active[start2]
+			copy(spare[i*elsize:][:elsize], active[start2*elsize:][:elsize])
 			start2++
 			bset = false
 		} else {
-			spare[i] = active[start1]
+			copy(spare[i*elsize:][:elsize], active[start1*elsize:][:elsize])
 			start1++
 			aset = false
 		}
@@ -250,7 +236,7 @@ func mergeSortUnit[T any](
 		}
 	}
 	for start1 < end1 {
-		spare[i] = active[start1]
+		copy(spare[i*elsize:][:elsize], active[start1*elsize:][:elsize])
 		start1++
 		i++
 		scounter++
@@ -262,7 +248,7 @@ func mergeSortUnit[T any](
 		}
 	}
 	for start2 < end2 {
-		spare[i] = active[start2]
+		copy(spare[i*elsize:][:elsize], active[start2*elsize:][:elsize])
 		start2++
 		i++
 		scounter++
@@ -274,30 +260,4 @@ func mergeSortUnit[T any](
 		}
 	}
 	return scounter, true
-}
-
-func calcMergeLevels(count int) int {
-	// Calculate the number of levels needed to perform a merge sort.
-	//
-	// For example, let's say we have 22 inital items:
-	//
-	// 1: [.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.][.] 22
-	// 2: [....][....][....][....][....][....][....][....][....][....][....] 11
-	// 3: [..........][..........][..........][..........][..........][....]  6
-	// 4: [......................][......................][................]  3
-	// 5: [..............................................][................]  2
-	// 6: [................................................................]  1
-	//
-	// This will take 5 levels to complete.
-	//
-	var levels int
-	for count > 1 {
-		if count&1 == 0 {
-			count /= 2
-		} else {
-			count = count/2 + 1
-		}
-		levels++
-	}
-	return levels
 }

@@ -1,6 +1,7 @@
 package progsort
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand"
@@ -70,6 +71,75 @@ func TestProgSort(t *testing.T) {
 		}
 		<-done
 		if !sort.IntsAreSorted(items) {
+			if !cancelEarly {
+				t.Fatal("not sorted")
+			} else {
+				unsorted++
+			}
+		} else {
+			sorted++
+		}
+	}
+}
+
+func TestProgSortBytes(t *testing.T) {
+	start := time.Now()
+	ilens := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	var sorted int
+	var unsorted int
+	for time.Since(start) < time.Second*2 {
+		var N int
+		var cancelEarly bool
+		if len(ilens) > 0 {
+			N = ilens[0]
+			ilens = ilens[1:]
+		} else {
+			N = rand.Int() % 50_000
+			cancelEarly = rand.Int()%5 == 0
+		}
+		items := make([]byte, N*8)
+		for i, x := range rand.Perm(N) {
+			binary.LittleEndian.PutUint64(items[i*8:], uint64(x))
+		}
+		final := make([]byte, N*8)
+		var prog int32
+		var cancel int32
+		done := make(chan bool, 1)
+		go func() {
+			swapped := SortBytes(items, final, 8, func(a, b []byte) bool {
+				x := int(binary.LittleEndian.Uint64(a))
+				y := int(binary.LittleEndian.Uint64(b))
+				return x < y
+			}, func(perc float64) bool {
+				// &prog, &cancel
+				atomic.StoreInt32(&prog, int32(perc*math.MaxInt32))
+				return atomic.LoadInt32(&cancel) == 0
+			})
+			if swapped {
+				items, final = final, items
+			}
+			done <- true
+		}()
+		var prev float64
+		for {
+			p := float64(atomic.LoadInt32(&prog)) / math.MaxInt32
+			if p < prev {
+				t.Fatal("out of order")
+			}
+			if p > 0.5 && cancelEarly {
+				atomic.StoreInt32(&cancel, 1)
+				break
+			}
+			if p == 1 {
+				break
+			}
+		}
+		<-done
+		res := make([]int, N)
+		for i := 0; i < N; i++ {
+			res[i] = int(binary.LittleEndian.Uint64(items[i*8:]))
+		}
+		if !sort.IntsAreSorted(res) {
 			if !cancelEarly {
 				t.Fatal("not sorted")
 			} else {
